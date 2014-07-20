@@ -136,9 +136,11 @@ markovTweets =
   CL.foldMap (\tweet -> fromCorpus markovLength (T.unpack $ tweet ^. statusText))
 
 rmMentions :: String -> String
-rmMentions "" = ""
-rmMentions (' ' : '@' : cs) = rmMentions cs
-rmMentions (c : cs) = c : rmMentions cs
+rmMentions = unwords . map rmMention . words
+ where
+  rmMention xs = case xs of
+    '@' : rest -> rest
+    _ -> xs
 
 markovZoahTweets :: IO ()
 markovZoahTweets = do

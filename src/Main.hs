@@ -10,14 +10,16 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified System.IO as IO
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Functor ((<$))
+import Data.Functor
 import Data.Function (fix)
 import Prelude hiding (log)
 import System.Directory (doesFileExist)
 import System.Random (newStdGen)
 
+import qualified Data.CaseInsensitive as CI
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Binary as CB
 import qualified Data.Conduit.List as CL
@@ -128,19 +130,24 @@ appendTweetsFile n = do
         C.$$ tweetsToFile))
     log
 
+type Token = CI.CI T.Text
+
+textToTokens :: T.Text -> [Token]
+textToTokens = map CI.mk . T.words
+
+getSeed :: IO [Token]
+getSeed = textToTokens <$> T.getLine
+
+tokensToText :: [Token] -> T.Text
+tokensToText = T.unwords . map CI.original
+
 markovLength :: (Num n) => n
-markovLength = 6
+markovLength = 2
 
-markovTweets :: (Monad m) => C.Consumer Status m (Markov Char)
+markovTweets :: (Monad m) => C.Consumer Status m (Markov Token)
 markovTweets =
-  CL.foldMap (\tweet -> fromCorpus markovLength (T.unpack $ tweet ^. statusText))
-
-rmMentions :: String -> String
-rmMentions = unwords . map rmMention . words
- where
-  rmMention xs = case xs of
-    '@' : rest -> rest
-    _ -> xs
+  CL.foldMap (\tweet ->
+    fromCorpus markovLength (textToTokens $ tweet ^. statusText))
 
 markovZoahTweets :: IO ()
 markovZoahTweets = do
@@ -150,8 +157,8 @@ markovZoahTweets = do
     putStr "> "
     IO.hFlush IO.stdout
     IO.hSetBuffering IO.stdin IO.NoBuffering
-    seed <- replicateM (markovLength - 1) getChar
-    T.putStrLn . T.pack . rmMentions $ runMarkov markov rand (Q.fromList seed)
+    seed <- getSeed
+    T.putStrLn . tokensToText $ runMarkov markov rand (Q.fromList seed)
     loop
 
 postTestTweet :: IO ()

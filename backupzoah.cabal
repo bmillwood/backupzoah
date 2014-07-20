@@ -31,6 +31,7 @@ Executable twitter
     authenticate-oauth,
     base < 5,
     bytestring,
+    case-insensitive,
     conduit,
     conduit-extra,
     containers,

@@ -11,9 +11,11 @@ import qualified Data.Text.IO as T
 import qualified System.IO as IO
 
 import Control.Applicative
+import Control.Concurrent (threadDelay)
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Function (fix)
+import Data.Maybe (fromMaybe)
 import Prelude hiding (log)
 import System.Directory (doesFileExist)
 import System.Random (newStdGen)
@@ -102,11 +104,14 @@ ctakeWhile p = C.await >>= \case
     | p x -> C.yield x >> ctakeWhile p
     | otherwise -> C.leftover x
 
-log :: Loc -> LogSource -> LogLevel -> LogStr -> IO ()
-log _ _ LevelDebug _ = return ()
-log _ source level logstr = do
-  T.putStr (T.unwords [source, T.pack (show level), ""])
-  B8.putStrLn (fromLogStr logstr)
+withLog :: LoggingT m a -> m a
+withLog = flip runLoggingT log
+ where
+  log :: Loc -> LogSource -> LogLevel -> LogStr -> IO ()
+  log _ _ LevelDebug _ = return ()
+  log _ source level logstr = do
+    T.putStr (T.unwords [source, T.pack (show level), ""])
+    B8.putStrLn (fromLogStr logstr)
 
 updateTweetsFile :: IO ()
 updateTweetsFile = do
@@ -115,19 +120,16 @@ updateTweetsFile = do
     stop = case fileTweets ^? _head . statusId of
       Nothing -> CL.isolate 100
       Just newestId -> ctakeWhile (\tweet -> tweet ^. statusId > newestId)
-  runLoggingT (withCredential
-    (((getZoahTweets Nothing C.$= stop) >> CL.sourceList fileTweets) C.$$ tweetsToFile))
-    log
+  withLog . withCredential $
+    ((getZoahTweets Nothing C.$= stop) >> CL.sourceList fileTweets) C.$$ tweetsToFile
 
 appendTweetsFile :: Int -> IO ()
 appendTweetsFile n = do
   fileTweets <- runResourceT (tweetsFromFile C.$$ CL.consume)
   let maxIdVal = fmap (subtract 1) (fileTweets ^? _last . statusId)
-  runLoggingT
-    (withCredential
-      ((CL.sourceList fileTweets >> (getZoahTweets maxIdVal C.$= CL.isolate n))
-        C.$$ tweetsToFile))
-    log
+  withLog . withCredential $
+    ((CL.sourceList fileTweets >> (getZoahTweets maxIdVal C.$= CL.isolate n))
+      C.$$ tweetsToFile)
 
 type Token = CI.CI T.Text
 
@@ -152,14 +154,13 @@ markovTweets =
   CL.foldMap (\tweet ->
     fromCorpus markovLength (textToTokens $ tweet ^. statusText))
 
-markovZoahTweets :: IO ()
-markovZoahTweets = do
+testMarkov :: IO ()
+testMarkov = do
   markov <- runResourceT (tweetsFromFile C.$$ markovTweets)
   fix $ \loop -> do
     rand <- newStdGen
     putStr "> "
     IO.hFlush IO.stdout
-    IO.hSetBuffering IO.stdin IO.NoBuffering
     seed <- getSeed
     T.putStrLn . tokensToText $ runMarkov markov rand (Q.fromList seed)
     loop
@@ -171,5 +172,24 @@ postTestTweet = runNoLoggingT . withCredential $ do
     \Through inaction I frequently allow other humans to come to harm.")
   return ()
 
+sincePath :: FilePath
+sincePath = "/home/ben/.backupzoah/mentionsSince"
+
+readSinceId :: IO Integer
+readSinceId = read <$> readFile sincePath
+
+writeSinceId :: Integer -> IO ()
+writeSinceId n = writeFile sincePath (show n ++ "\n")
+
+forMentions :: (Status -> IO ()) -> IO ()
+forMentions k = withLog . withCredential . fix $ \loop -> do
+  since <- liftIO readSinceId
+  tweets <- call (mentionsTimeline & sinceId ?~ since)
+  liftIO $ do
+    writeSinceId (fromMaybe since (maximumOf (folded . statusId) tweets))
+    mapM_ k tweets
+    threadDelay (5 * 1000 * 1000)
+  loop
+
 main :: IO ()
-main = markovZoahTweets
+main = testMarkov

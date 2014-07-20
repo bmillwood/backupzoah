@@ -13,7 +13,6 @@ import qualified System.IO as IO
 import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Functor
 import Data.Function (fix)
 import Prelude hiding (log)
 import System.Directory (doesFileExist)
@@ -133,7 +132,11 @@ appendTweetsFile n = do
 type Token = CI.CI T.Text
 
 textToTokens :: T.Text -> [Token]
-textToTokens = map CI.mk . T.words
+textToTokens = map CI.mk . map unMention . T.words
+ where
+  unMention text = case T.uncons text of
+    Just ('@', rest) -> rest
+    _ -> text
 
 getSeed :: IO [Token]
 getSeed = textToTokens <$> T.getLine

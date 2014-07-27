@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections #-}
 
 module Main where
 
@@ -12,10 +13,16 @@ import qualified System.IO as IO
 
 import Control.Applicative
 import Control.Concurrent (threadDelay)
+import Control.Exception (handleJust)
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Function (fix)
-import Data.Maybe (fromMaybe)
+import Data.List (sortBy)
+import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Monoid ((<>))
+import Data.Ord (comparing)
+import Data.Time
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Prelude hiding (log)
 import System.Directory (doesFileExist)
 import System.Random (newStdGen)
@@ -29,9 +36,10 @@ import qualified Web.Authenticate.OAuth as OA
 
 import Control.Lens
 import Control.Monad.Logger
+import Control.Monad.Trans.Control (control)
 import Control.Monad.Trans.Resource
 import Data.Default (def)
-import Network.HTTP.Conduit (Manager, withManager)
+import Network.HTTP.Conduit (Manager, withManager, HttpException (StatusCodeException))
 import System.Log.FastLogger (LogStr, fromLogStr)
 import Web.Authenticate.OAuth (OAuth(..), Credential(..))
 import Web.Twitter.Conduit
@@ -154,15 +162,18 @@ markovTweets =
   CL.foldMap (\tweet ->
     fromCorpus markovLength (textToTokens $ tweet ^. statusText))
 
+runMarkovIO :: (Ord c) => Markov c -> [c] -> IO [c]
+runMarkovIO markov seed =
+  fmap (\rand -> runMarkov markov rand (Q.fromList seed)) newStdGen
+
 testMarkov :: IO ()
 testMarkov = do
   markov <- runResourceT (tweetsFromFile C.$$ markovTweets)
   fix $ \loop -> do
-    rand <- newStdGen
     putStr "> "
     IO.hFlush IO.stdout
     seed <- getSeed
-    T.putStrLn . tokensToText $ runMarkov markov rand (Q.fromList seed)
+    T.putStrLn . tokensToText =<< runMarkovIO markov seed
     loop
 
 postTestTweet :: IO ()
@@ -181,15 +192,65 @@ readSinceId = read <$> readFile sincePath
 writeSinceId :: Integer -> IO ()
 writeSinceId n = writeFile sincePath (show n ++ "\n")
 
-forMentions :: (Status -> IO ()) -> IO ()
-forMentions k = withLog . withCredential . fix $ \loop -> do
+forMentions :: (MonadBaseControl IO m, MonadLogger m, MonadThrow m, MonadIO m)
+  => (Status -> TW (ResourceT m) ()) -> TW (ResourceT m) ()
+forMentions k = forever . withExceptions $ do
   since <- liftIO readSinceId
   tweets <- call (mentionsTimeline & sinceId ?~ since)
   liftIO $ do
     writeSinceId (fromMaybe since (maximumOf (folded . statusId) tweets))
-    mapM_ k tweets
-    threadDelay (5 * 1000 * 1000)
-  loop
+    mapM_ print tweets
+  mapM_ k tweets
+  liftIO $ threadDelay (30 * 1000 * 1000)
+ where
+  withExceptions act = control $ \runInIO ->
+    handleJust
+      isStatusCodeException
+      (\s -> waitOnRateLimit s >> runInIO (withExceptions act))
+      (runInIO act)
+  isStatusCodeException (StatusCodeException _ headers _) =
+    lookup (CI.mk "x-rate-limit-reset") headers
+  isStatusCodeException _ = Nothing
+  waitOnRateLimit s = do
+    now <- getCurrentTime
+    putStrLn $ "waiting for " ++ show until
+    threadDelay (1000 * 1000 * ceiling (diffUTCTime until now) + 1)
+   where
+    until = posixSecondsToUTCTime . fromInteger . read . B8.unpack $ s
+
+data Truncatedness = Untruncated | Truncated deriving (Eq, Ord)
 
 main :: IO ()
-main = testMarkov
+main = do
+  markov <- runResourceT (tweetsFromFile C.$$ markovTweets)
+  runNoLoggingT . withCredential . forMentions $ \tweet -> do
+    let
+      who = T.cons '@' (tweet ^. statusUser . userScreenName)
+      seeds =
+        map textToTokens .
+        sortBy (flip (comparing T.length)) .
+        filter (/= self) .
+        T.words
+          $ tweet ^. statusText
+    results <- mapM (\seed -> (seed ,) <$> liftIO (runMarkovIO markov seed)) seeds
+    let
+      mkTweet (seed, result) = do
+        guard $ not (null result)
+        let
+          words = who : map CI.original (seed ++ result)
+          _ : withLen = scanl accuLen (-1, "") words
+          accuLen (len, _) text = (len + 1 + T.length text, text)
+        Just $ case span (\ (len, _) -> len <= 140) withLen of
+          (xs, []) -> (Untruncated, xs)
+          (xs, _) -> (Truncated, xs)
+      resultTweets =
+        sortBy (comparing fst <> comparing (length . snd))
+          (mapMaybe mkTweet results)
+    case resultTweets of
+      [] -> return ()
+      (_, xs) : _ -> do
+          liftIO $ print tweet
+          void $ call (update tweet)
+        where tweet = T.unwords (map snd xs)
+ where
+  self = "@bensguineapig"

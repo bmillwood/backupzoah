@@ -245,7 +245,7 @@ main = do
           (xs, []) -> (Untruncated, xs)
           (xs, _) -> (Truncated, xs)
       resultTweets =
-        sortBy (comparing fst <> comparing (length . snd))
+        sortBy (comparing fst <> flip (comparing (length . snd)))
           (mapMaybe mkTweet results)
     liftIO $ print (map (_2 . mapped %~ snd) resultTweets)
     case resultTweets of

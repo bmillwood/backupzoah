@@ -255,4 +255,4 @@ main = do
           void $ call (update tweet & inReplyToStatusId ?~ fromId)
         where tweet = T.unwords (map snd xs)
  where
-  self = "@bensguineapig"
+  self = "@backupzoah"

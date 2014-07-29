@@ -183,13 +183,6 @@ testMarkov = do
     T.putStrLn . tokensToText =<< runMarkovIO markov seed
     loop
 
-postTestTweet :: IO ()
-postTestTweet = runNoLoggingT . withCredential $ do
-  _ <- call (update "\
-    \I must not harm humans. \
-    \Through inaction I frequently allow other humans to come to harm.")
-  return ()
-
 getSincePath :: IO FilePath
 getSincePath = file "mentionsSince"
 

@@ -198,11 +198,11 @@ forMentions :: (MonadBaseControl IO m, MonadLogger m, MonadThrow m, MonadIO m)
 forMentions k = forever . withExceptions $ do
   since <- liftIO readSinceId
   tweets <- call (mentionsTimeline & sinceId ?~ since)
+  liftIO $ mapM_ print tweets
+  mapM_ k tweets
   liftIO $ do
     writeSinceId (fromMaybe since (maximumOf (folded . statusId) tweets))
-    mapM_ print tweets
-  mapM_ k tweets
-  liftIO $ threadDelay (30 * 1000 * 1000)
+    threadDelay (60 * 1000 * 1000)
  where
   withExceptions act = control $ \runInIO ->
     handleJust

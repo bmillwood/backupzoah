@@ -38,6 +38,7 @@ Executable twitter
     data-default,
     directory,
     fast-logger,
+    filepath,
     hashable,
     http-conduit,
     lens,

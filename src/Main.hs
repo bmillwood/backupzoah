@@ -25,6 +25,8 @@ import Data.Time
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Prelude hiding (log)
 import System.Directory (doesFileExist)
+import System.Environment (getEnv)
+import System.FilePath ((</>))
 import System.Random (newStdGen)
 
 import qualified Data.CaseInsensitive as CI
@@ -48,6 +50,12 @@ import Markov
 import Orphans()
 import Secret (tokens)
 
+inHome :: FilePath -> IO FilePath
+inHome rel = fmap (</> rel) (getEnv "HOME")
+
+file :: FilePath -> IO FilePath
+file rel = fmap (</> rel) (inHome ".backupzoah")
+
 authorize :: (MonadBaseControl IO m, MonadResource m)
           => OAuth -- ^ OAuth Consumer key and secret
           -> (String -> m String) -- ^ PIN prompt
@@ -64,7 +72,7 @@ withCredential
   => TW (ResourceT m) a -> m a
 withCredential task = do
   cred <- liftIO $ do
-    let credPath = "/home/ben/.backupzoah/twitter-cred"
+    credPath <- file "twitter-cred"
     hasCred <- doesFileExist credPath
     if hasCred
       then IO.withFile credPath IO.ReadMode $ fmap read . IO.hGetLine
@@ -81,18 +89,18 @@ withCredential task = do
     IO.hFlush IO.stdout
     getLine
 
-tweetsPath :: FilePath
-tweetsPath = "/home/ben/.backupzoah/tweets"
+getTweetsPath :: IO FilePath
+getTweetsPath = file "tweets"
 
 tweetsFromFile :: C.Source (ResourceT IO) Status
-tweetsFromFile =
+tweetsFromFile = liftIO getTweetsPath >>= \tweetsPath ->
   CB.sourceFile tweetsPath
     C.$= CT.decode CT.utf8
     C.$= CT.lines
     C.$= CL.map (\line -> read (T.unpack line))
 
 tweetsToFile :: (MonadResource m) => C.Sink Status m ()
-tweetsToFile =
+tweetsToFile = liftIO getTweetsPath >>= \tweetsPath ->
   CL.map (\tweet -> T.pack (show tweet ++ "\n"))
     C.=$ CT.encode CT.utf8
     C.=$ CB.sinkFile tweetsPath
@@ -183,14 +191,15 @@ postTestTweet = runNoLoggingT . withCredential $ do
     \Through inaction I frequently allow other humans to come to harm.")
   return ()
 
-sincePath :: FilePath
-sincePath = "/home/ben/.backupzoah/mentionsSince"
+getSincePath :: IO FilePath
+getSincePath = file "mentionsSince"
 
 readSinceId :: IO Integer
-readSinceId = read <$> readFile sincePath
+readSinceId = fmap read . readFile =<< getSincePath
 
 writeSinceId :: Integer -> IO ()
-writeSinceId n = writeFile sincePath (show n ++ "\n")
+writeSinceId n =
+  getSincePath >>= \sincePath -> writeFile sincePath (show n ++ "\n")
 
 forMentions :: (MonadBaseControl IO m, MonadLogger m, MonadThrow m, MonadIO m)
   => (Status -> TW (ResourceT m) ()) -> TW (ResourceT m) ()

@@ -124,7 +124,6 @@ withLog :: LoggingT m a -> m a
 withLog = flip runLoggingT log
  where
   log :: Loc -> LogSource -> LogLevel -> LogStr -> IO ()
-  log _ _ LevelDebug _ = return ()
   log _ source level logstr = do
     T.putStr (T.unwords [source, T.pack (show level), ""])
     B8.putStrLn (fromLogStr logstr)
@@ -232,7 +231,7 @@ data Truncatedness = Untruncated | Truncated deriving (Eq, Ord)
 main :: IO ()
 main = do
   markov <- runResourceT (tweetsFromFile C.$$ markovTweets)
-  runNoLoggingT . withCredential . forMentions $ \tweet -> do
+  withLog . withCredential . forMentions $ \tweet -> do
     let
       mention = T.cons '@' (tweet ^. statusUser . userScreenName)
       fromId = tweet ^. statusId

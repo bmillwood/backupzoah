@@ -230,7 +230,6 @@ main = do
       fromId = tweet ^. statusId
       seeds =
         map textToTokens .
-        sortBy (flip (comparing T.length)) .
         filter (/= self) .
         T.words
           $ tweet ^. statusText

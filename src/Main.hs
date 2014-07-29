@@ -214,7 +214,7 @@ forMentions k = forever . withExceptions $ do
   waitOnRateLimit s = do
     now <- getCurrentTime
     putStrLn $ "waiting for " ++ show until
-    threadDelay (1000 * 1000 * ceiling (diffUTCTime until now) + 1)
+    threadDelay (1000 * 1000 * (ceiling (diffUTCTime until now) + 30))
    where
     until = posixSecondsToUTCTime . fromInteger . read . B8.unpack $ s
 

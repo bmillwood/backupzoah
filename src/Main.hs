@@ -219,7 +219,7 @@ forMentions k = forever . withExceptions $ do
    where
     until = posixSecondsToUTCTime . fromInteger . read . B8.unpack $ s
 
-data Truncatedness = Untruncated | Truncated deriving (Eq, Ord)
+data Truncatedness = Untruncated | Truncated deriving (Eq, Ord, Show)
 
 main :: IO ()
 main = do
@@ -248,6 +248,7 @@ main = do
       resultTweets =
         sortBy (comparing fst <> comparing (length . snd))
           (mapMaybe mkTweet results)
+    liftIO $ print (map (_2 . mapped %~ snd) resultTweets)
     case resultTweets of
       [] -> return ()
       (_, xs) : _ -> do

@@ -225,7 +225,8 @@ main = do
   markov <- runResourceT (tweetsFromFile C.$$ markovTweets)
   runNoLoggingT . withCredential . forMentions $ \tweet -> do
     let
-      who = T.cons '@' (tweet ^. statusUser . userScreenName)
+      mention = T.cons '@' (tweet ^. statusUser . userScreenName)
+      fromId = tweet ^. statusId
       seeds =
         map textToTokens .
         sortBy (flip (comparing T.length)) .
@@ -237,7 +238,7 @@ main = do
       mkTweet (seed, result) = do
         guard $ not (null result)
         let
-          words = who : map CI.original (seed ++ result)
+          words = mention : map CI.original (seed ++ result)
           _ : withLen = scanl accuLen (-1, "") words
           accuLen (len, _) text = (len + 1 + T.length text, text)
         Just $ case span (\ (len, _) -> len <= 140) withLen of
@@ -250,7 +251,7 @@ main = do
       [] -> return ()
       (_, xs) : _ -> do
           liftIO $ print tweet
-          void $ call (update tweet)
+          void $ call (update tweet & inReplyToStatusId ?~ fromId)
         where tweet = T.unwords (map snd xs)
  where
   self = "@bensguineapig"

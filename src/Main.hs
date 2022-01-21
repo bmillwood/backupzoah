@@ -195,14 +195,16 @@ writeSinceId n =
 
 forMentions :: (MonadBaseControl IO m, MonadLogger m, MonadThrow m, MonadIO m)
   => (Status -> TW (ResourceT m) ()) -> TW (ResourceT m) ()
-forMentions k = forever . withExceptions $ do
+forMentions k = withExceptions $ do
   since <- liftIO readSinceId
   tweets <- call (mentionsTimeline & sinceId ?~ since)
-  liftIO $ mapM_ print tweets
-  mapM_ k tweets
-  liftIO $ do
-    writeSinceId (fromMaybe since (maximumOf (folded . statusId) tweets))
-    threadDelay (60 * 1000 * 1000)
+  when (not (null tweets)) $ do
+    liftIO $ mapM_ print tweets
+    mapM_ k tweets
+    liftIO $ do
+      writeSinceId (fromMaybe since (maximumOf (folded . statusId) tweets))
+      threadDelay (60 * 1000 * 1000)
+    forMentions k
  where
   withExceptions act = control $ \runInIO ->
     handleJust
